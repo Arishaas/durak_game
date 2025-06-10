@@ -1,5 +1,6 @@
-from main.responses import FileResponse
+from fastapi.responses import FileResponse
 
-@app.get("/favicon.ico", include_in=False)
+
+@app.get("/favicon.ico", include_in_schema=False)
 async def favicon():
-    return FileResponse("favicon.ico")
+    return FileResponse("static/favicon.ico")

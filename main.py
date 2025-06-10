@@ -13,7 +13,7 @@ app = FastAPI()
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_creditials=True,
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -41,10 +41,82 @@ async def websocket_endpoint(websocket: WebSocket, game_code: str):
             data = await websocket.receive_text()
             print(f"Сообщение от клиента: {data}")
 
+            action = data.get("action")
+            if action == "play":
+                req = data.get("data", {})
+                player_id = req.get("player_id")
+                cards = req.get("cards")
+
+                game = games.get(game_code)
+                if not game:
+                    await websocket.send_json({"error": "Игра не найдена"})
+                    continue
+
+                player = next((p for p in game.players if p.id == player_id), None)
+                if not player:
+                    await websocket.send_json({"error": "Игрок не найден"})
+                    continue
+
+                try:
+                    game.player_cards(player, cards)
+                    game.replace_hand(player)
+
+                    state = {
+                        "action" : "update",
+                        "data": {
+                            "players": [p.name for p in game.players],
+                            "curr_turn": game.curr_turn,
+                            "cards_on_table": [[str(c) if c else None for c in pair] for pair in game.cards_on_table],
+                            "deck_count": len(game.deck),
+                        }
+                    }
+
+                    for con in active_connections.get(game_code, []):
+                        await con.send_json(state)
+
+                except Exception as ex:
+                    await websocket.send_json({"error": str(ex)})
+
+            elif action == "defend":
+                req = data.get("data", {})
+                player_id = req.get("player_id")
+                attack = req.get("card_attack")
+                defence = req.get("card_defence")
+
+                game = games.get(game_code)
+                if not game:
+                    await websocket.send_json({"error": "Игра не найдена"})
+                    continue
+
+                player = next((p for p in game.players if p.id == player_id), None)
+                if not player:
+                    await websocket.send_json({"error": "Игрок не найден"})
+                    continue
+
+                try:
+                    game.defend_card(attack, defence, player)
+                    state = {
+                        "action": "update",
+                        "data": {
+                            "players": [p.name for p in game.players],
+                            "curr_turn": game.curr_turn,
+                            "cards_on_table": [[str(c) if c else None for c in pair] for pair in game.cards_on_table],
+                            "deck_count": len(game.deck),
+                        }
+                    }
+                    for con in active_connections.get(game_code, []):
+                        await con.send_json(state)
+
+                except Exception as ex:
+                    await websocket.send_json({"error": str(ex)})
+    
     except Exception as e:
-        active_connections[game_code].remove(websocket)
-        if not active_connections[game_code]:
-            del active_connections[game_code]
+        print("Клиент отключился:", e)
+    finally:
+        if game_code in active_connections and websocket in active_connections[game_code]:
+            active_connections[game_code].remove(websocket)
+            if not active_connections[game_code]:
+                del active_connections[game_code]
 
 
 class User(BaseModel):
